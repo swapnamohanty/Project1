@@ -1,0 +1,639 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code.
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*.
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+```{r}
+library(stats)
+library(readr)
+library(tidyverse)
+library(funModeling)
+library(dplyr)
+library(missForest)
+library(mice)
+library(ggpubr)
+library(corrplot)
+library(rsample)
+library(recipes)
+library(parsnip)
+library(dials)
+library(tidymodels)
+library(car)
+library(vip)
+library(ggplot2)
+library(caret)
+```
+
+```{r}
+hotel_data <- read.csv("C:/Users/swapn/Downloads/hotel_booking.csv/hotel_booking.csv", stringsAsFactors = T, encoding = "UTF-8")
+```
+
+```{r}
+head(hotel_data)
+```
+
+```{r}
+str(hotel_data)
+```
+
+```{r}
+summary(hotel_data)
+```
+
+```{r}
+# dropping columns
+hotel_data <- subset(hotel_data, select = -c(name, email, phone.number, credit_card))
+
+
+```
+
+```{r}
+# converting reservation_status_date into date time format
+# Assuming 'data' is your DataFrame
+hotel_data$reservation_status_date <- as.POSIXct(hotel_data$reservation_status_date)
+
+```
+
+```{r}
+#summary(hotel_data[sapply(hotel_data, is.character)])
+#summary(hotel_data,is.character(hotel_data))
+# Assuming 'data' is your dataframe
+summary(hotel_data[sapply(hotel_data, is.character) | sapply(hotel_data, is.factor)])
+
+```
+
+```{r}
+
+# Filter only character and factor columns
+char_factor_cols <- names(hotel_data)[sapply(hotel_data, is.character) | sapply(hotel_data, is.factor)]
+
+# Loop through the columns and print unique values
+for (col in char_factor_cols) {
+  cat(col, "\n")
+  print(unique(hotel_data[[col]]))
+  cat(strrep('-', 50), "\n")
+}
+
+
+
+
+
+```
+
+```{r}
+# checking null values
+colSums(is.na(hotel_data))
+
+```
+
+```{r}
+# Calculate percentage of missing values for each column
+missing_percentage <- round(colSums(is.na(hotel_data)) / nrow(hotel_data) * 100, 2)
+
+# Sort the results in descending order
+sorted_missing <- sort(missing_percentage, decreasing = TRUE)
+
+sorted_missing
+
+
+```
+
+```{r}
+# Dropping the 'company' and 'agent' columns as it has more missing values
+hotel_data$company <- NULL
+hotel_data$agent <- NULL
+
+# Drop rows with any missing values
+hotel_data <- na.omit(hotel_data)
+
+```
+
+```{r}
+summary(hotel_data)
+```
+
+```{r}
+boxplot(hotel_data$adr, main="Boxplot of adr", ylab="adr")
+
+```
+
+```{r}
+#As we can see there is  outlier which is so high, I am removing it.
+hotel_data <- hotel_data[hotel_data$adr < 5000, ]
+
+```
+
+```{r}
+canceled_percent <- prop.table(table(hotel_data$is_canceled)) * 100
+canceled_percent
+```
+
+```{r}
+# plot the graph
+canceled_counts <- table(hotel_data$is_canceled)
+bar_names <- c('not_canceled', 'canceled')
+
+barplot(canceled_counts, names.arg = bar_names, col = 'yellow',
+        main = 'Reservation Status Count', xlab = 'Reservation Status',
+        ylab = 'Count', border = 'black', width = 0.7)
+
+  theme_minimal()
+
+
+```
+
+```{r}
+# Create the count plot
+ggplot(hotel_data, aes(x = hotel, fill = as.factor(is_canceled))) +
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Greens", name = "is_canceled") +
+  labs(title = "Reservation Status in different hotel", x = "Hotel", y = "Number Of Reservations") +
+  theme_minimal()
+
+```
+
+```{r}
+resort_hotel <- subset(hotel_data, hotel == 'Resort Hotel')
+canceled_percent <- prop.table(table(resort_hotel$is_canceled))* 100 
+canceled_percent
+```
+
+```{r}
+city_hotel <- subset(hotel_data, hotel == 'City Hotel')
+canceled_percent <- prop.table(table(city_hotel$is_canceled))* 100 
+canceled_percent
+```
+
+```{r}
+# Is there any effect of price on cancelation for hotels
+grouped_data <- aggregate(adr ~ reservation_status_date + hotel, hotel_data, mean)
+
+ggplot(grouped_data, aes(x = reservation_status_date, y = adr, color = hotel)) +
+  geom_line(size = 1) +
+  labs(title = "Average Daily Price in City and Resort Hotel",
+       x = "Date",
+       y = "Average Price") +
+  theme_minimal() +
+  scale_color_manual(values = c("City Hotel" = "blue", "Resort Hotel" = "green")) +
+  theme(legend.title = element_blank())
+
+```
+
+```{r}
+# Extract the month from the 'reservation_status_date' column
+hotel_data$month <- month(as.Date(hotel_data$reservation_status_date, format="%Y-%m-%d"))
+
+# Create the count plot
+ggplot(hotel_data, aes(x = as.factor(month), fill = as.factor(is_canceled))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Reservation status in different month", x = "Month", y = "Reservation count") +
+  scale_fill_manual(values = c("blue", "red"), name = "is_canceled", labels = c("not-canceled", "canceled")) +
+  theme_minimal()
+
+```
+
+```{r}
+# Filter data and sum 'adr' values for each month
+adr_per_month <- hotel_data %>%
+  filter(is_canceled == 1) %>%
+  group_by(month) %>%
+  summarise(total_adr = sum(adr))
+
+# Create the bar plot
+ggplot(adr_per_month, aes(x = as.factor(month), y = total_adr)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(title = "ADR per month", x = "Month", y = "Total ADR") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 20))
+
+```
+
+```{r}
+canceled_data <- subset(hotel_data, reservation_status == 'Canceled')
+top_10_countries <- head(names(sort(table(canceled_data$country), decreasing = TRUE)), 10)
+top_10_countries
+```
+
+```{r}
+# Filter data and get top 10 countries based on the number of cancellations
+top_10_countries <- hotel_data %>%
+  filter(is_canceled == 1) %>%
+  count(country) %>%
+  top_n(10, wt = n) %>%
+  mutate(percentage = n/sum(n))
+
+# Create the pie chart
+ggplot(top_10_countries, aes(x = "", y = percentage, fill = country)) + 
+  geom_bar(stat = "identity", width = 1) +
+ coord_polar("y", start = 0) +
+  geom_text(aes(label = scales::percent(percentage)), position = position_stack(vjust = 0.5)) +
+  labs(title = "Rate of cancellation in top 10 countries") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 30))
+
+
+
+
+```
+
+```{r}
+
+table(hotel_data$market_segment)
+
+
+
+
+
+
+```
+
+```{r}
+market_segment_counts <- table(canceled_data$market_segment)
+market_segment_percent <- prop.table(market_segment_counts) * 100
+view(market_segment_percent)
+```
+
+```{r}
+# Create the count plot
+ggplot(hotel_data, aes(x = market_segment, fill = reservation_status)) +
+  geom_bar(position = "dodge") +
+  scale_fill_brewer(palette = "Blues", name = "reservation_status", labels = c("Not_canceled", "Canceled")) +
+  labs(title = "Reservation Status in Different Market Segment", x = "Market Segment", y = "Number of Reservation") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16))
+
+
+```
+
+```{r}
+# Filter and group data for canceled reservations
+canceled_data_price <- hotel_data %>%
+  filter(is_canceled == 1) %>%
+  group_by(reservation_status_date) %>%
+  summarise(adr = mean(adr, na.rm = TRUE)) %>%
+  arrange(reservation_status_date)
+
+# Filter and group data for not canceled reservations
+not_canceled_data_price <-hotel_data  %>%
+  filter(is_canceled == 0) %>%
+  group_by(reservation_status_date) %>%
+  summarise(adr = mean(adr, na.rm = TRUE)) %>%
+  arrange(reservation_status_date)
+
+# Create the line plot
+ggplot() +
+  geom_line(data = not_canceled_data_price, aes(x = reservation_status_date, y = adr, color = "not_canceled")) +
+  geom_line(data = canceled_data_price, aes(x = reservation_status_date, y = adr, color = "canceled")) +
+  labs(title = "Average price wise difference in reservation status over time", x = "Date", y = "Average Price") +
+  scale_color_manual(values = c("not_canceled" = "blue", "canceled" = "red"), name = "Reservation Status") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 15))
+
+
+```
+
+```{r}
+# Filter canceled_data_price based on the date range
+canceled_data_price <- canceled_data_price %>%
+  filter(reservation_status_date > as.Date("2016-01-01") & 
+         reservation_status_date < as.Date("2017-09-01"))
+
+# Filter not_canceled_data_price based on the date range
+not_canceled_data_price <- not_canceled_data_price %>%
+  filter(reservation_status_date > as.Date("2016-01-01") & 
+         reservation_status_date < as.Date("2017-09-01"))
+
+
+```
+
+```{r}
+# Combine the two data frames for easier plotting
+combined_data <- bind_rows(
+  not_canceled_data_price %>% mutate(status = "not_canceled"),
+  canceled_data_price %>% mutate(status = "canceled")
+)
+
+# Create the line plot
+ggplot(combined_data, aes(x = reservation_status_date, y = adr, color = status)) +
+  geom_line() +
+  labs(title = "Average Daily rate", x = "Date", y = "Average Price") +
+  scale_color_manual(values = c("not_canceled" = "blue", "canceled" = "red"), name = "Reservation Status") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 20))
+
+
+```
+
+```{r}
+
+months <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+```
+
+```{r}
+# Group by hotel and month, then calculate the mean of 'adr'
+data_mon <- hotel_data %>%
+  group_by(hotel, arrival_date_month) %>%
+  summarise(adr = mean(adr, na.rm = TRUE),.groups = "drop") 
+  
+
+# Convert 'arrival_date_month' to a factor with a specified order
+data_mon$arrival_date_month <- factor(data_mon$arrival_date_month, levels = months, ordered = TRUE)
+
+# Sort the data based on the month
+data_mon <- data_mon %>%
+  arrange(arrival_date_month)
+data_mon
+
+
+```
+
+```{r}
+# Convert 'arrival_date_month' to a factor with a specified order
+months_order <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+data_mon$arrival_date_month <- factor(data_mon$arrival_date_month, levels = months_order)
+
+# Create the line plot
+ggplot(data_mon, aes(x = arrival_date_month, y = adr, color = hotel, group = hotel)) +
+  geom_line(size = 1) +
+  labs(title = "Average Daily rate by months", x = "Months", y = "Average daily price") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1),
+    plot.title = element_text(size = 16)
+  )
+
+
+
+```
+
+```{r}
+# Create the bar plot
+ggplot(hotel_data, aes(x = customer_type, y = adr, fill = hotel)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Daily rate by customer type", x = "Customer Type", y = "Daily Price") +
+  scale_fill_brewer(palette = "Set1", name = "Hotel") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16))
+
+
+```
+
+```{r}
+# Create the histogram with KDE
+ggplot(hotel_data, aes(x = lead_time, fill = hotel)) +
+  geom_histogram(aes(y = ..density..), position = "identity", alpha = 0.5, bins = 30) +
+  geom_density(aes(color = hotel), size = 1) +
+  labs(title = "Days in advanced of booking the hotel", x = "Number of Days", y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16))
+
+
+```
+
+```{r}
+# Create the count plot
+ggplot(hotel_data, aes(x = factor(is_canceled), fill = factor(is_repeated_guest))) +
+  geom_bar(position = "dodge") +
+  scale_x_discrete(labels = c("Not Cancelled", "Cancelled")) +
+  scale_fill_manual(values = c("blue", "red"), labels = c("New Guest", "Repeated Guest"), name = "Guest Type") +
+  labs(title = "Cancellations by repeated guests", x = "Cancellation Status", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16))
+
+```
+
+```{r}
+# Filter the data for rows where 'children' is 1 and then group by 'arrival_date_month'
+hotel_arrival <- hotel_data %>%
+  filter(is_canceled == 0)
+
+# Order the months
+months_order <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+children_month$arrival_date_month <- factor(children_month$arrival_date_month, levels = months_order)
+
+# Plot the data
+ggplot(children_month, aes(x = arrival_date_month, y = size)) +
+  geom_line(group = 1) +  # Ensure there's a single group for the line plot
+  labs(title = "The peak season vs off-season (with children)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16),
+    axis.line = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank()
+  )
+
+
+
+```
+
+```{r}
+
+
+# Filter the data for rows where 'children' is 0 and then group by 'arrival_date_month'
+no_children_month <- hotel_arrival %>%
+  filter(children == 0) %>%
+  group_by(arrival_date_month) %>%
+  summarise(size = n())
+
+# Ensure 'arrival_date_month' is ordered
+months_order <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+no_children_month$arrival_date_month <- factor(no_children_month$arrival_date_month, levels = months_order)
+
+# Create the line plot
+ggplot(no_children_month, aes(x = arrival_date_month, y = size)) +
+  geom_line(group = 1) +
+  labs(title = "The peak season vs off-season (no children)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16),
+    axis.line = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank()
+  )
+
+
+```
+
+```{r}
+
+# Creating a new variable for total stay duration
+hotel_data$total_stay <- hotel_data$stays_in_weekend_nights + hotel_data$stays_in_week_nights
+# Grouping by total stay and calculating cancellation rate
+stay_cancellation_rate <- hotel_data %>%
+  group_by(total_stay) %>%
+  summarise(cancellation_rate = mean(is_canceled, na.rm = TRUE) * 100) %>%
+  filter(total_stay <= 30)  # Filtering for stays up to 30 days for better visualization
+# Visualizing the results
+ggplot(stay_cancellation_rate, aes(x = total_stay, y = cancellation_rate)) +
+  geom_line() +
+  labs(title = 'Cancellation Rate by Duration of Stay',
+       x = 'Duration of Stay (Days)',
+       y = 'Cancellation Rate (%)') +
+  theme_minimal()
+
+
+```
+
+```{r}
+# Top countries by number of bookings
+top_countries <- hotel_data %>%
+  group_by(country) %>%
+  summarise(total_bookings = n()) %>%
+  arrange(-total_bookings) %>%
+  head(10)
+
+# Visualizing top countries
+ggplot(top_countries, aes(x = reorder(country, -total_bookings), y = total_bookings)) +
+  geom_bar(stat = 'identity') +
+  labs(title = 'Top 10 Countries by Number of Bookings',
+       x = 'Country',
+       y = 'Number of Bookings') +
+  theme_minimal()
+
+
+
+
+```
+
+```{r}
+# Grouping by number of special requests and calculating cancellation rate
+special_requests_data <- hotel_data %>%
+  group_by(total_of_special_requests) %>%
+  summarise(cancellation_rate = mean(is_canceled, na.rm = TRUE) * 100)
+
+# Visualizing cancellation rate by number of special requests
+ggplot(special_requests_data, aes(x = total_of_special_requests, y = cancellation_rate)) +
+  geom_line() +
+  labs(title = 'Cancellation Rate by Number of Special Requests',
+       x = 'Number of Special Requests',
+       y = 'Cancellation Rate (%)') +
+  theme_minimal()
+
+```
+
+```{r}
+# Grouping by deposit type and calculating cancellation rate
+deposit_cancellation_rate <- hotel_data %>%
+  group_by(deposit_type) %>%
+  summarise(cancellation_rate = mean(is_canceled, na.rm = TRUE) * 100)
+
+# Visualizing the results
+ggplot(deposit_cancellation_rate, aes(x = deposit_type, y = cancellation_rate, fill = deposit_type)) +
+  geom_bar(stat = 'identity') +
+  labs(title = 'Cancellation Rate by Deposit Type',
+       x = 'Deposit Type',
+       y = 'Cancellation Rate (%)') +
+  theme_minimal()
+
+```
+
+```{r}
+# Grouping by room type and calculating bookings and cancellations
+room_type_data <- hotel_data%>%
+  group_by(reserved_room_type) %>%
+  summarise(total_bookings = n(),
+            total_cancellations = sum(is_canceled, na.rm = TRUE))
+
+# Visualizing the results
+ggplot(room_type_data, aes(x = reserved_room_type)) +
+  geom_bar(aes(y = total_bookings, fill = "Total Bookings"), stat = 'identity') +
+  geom_bar(aes(y = total_cancellations, fill = "Total Cancellations"), stat = 'identity') +
+  labs(title = 'Bookings and Cancellations by Room Type',
+       x = 'Room Type',
+       y = 'Count') +
+  theme_minimal() +
+  scale_fill_manual(values = c("Total Bookings" = "blue", "Total Cancellations" = "red"))
+
+```
+
+```{r}
+# Grouping by previous cancellations and calculating cancellation rate
+previous_cancellations_data <- hotel_data %>%
+  group_by(previous_cancellations) %>%
+  summarise(cancellation_rate = mean(is_canceled, na.rm = TRUE) * 100)
+
+# Visualizing the results
+ggplot(previous_cancellations_data, aes(x = previous_cancellations, y = cancellation_rate)) +
+  geom_line() +
+  labs(title = 'Cancellation Rate by Previous Cancellations',
+       x = 'Number of Previous Cancellations',
+       y = 'Cancellation Rate (%)') +
+  theme_minimal()
+
+```
+
+```{r}
+# Grouping by waiting list status and calculating cancellation rate
+waiting_list_data <- hotel_data %>%
+  group_by(days_in_waiting_list) %>%
+  summarise(cancellation_rate = mean(is_canceled, na.rm = TRUE) * 100)
+
+# Visualizing the results
+ggplot(waiting_list_data, aes(x = days_in_waiting_list, y = cancellation_rate)) +
+  geom_line() +
+  labs(title = 'Cancellation Rate by Days in Waiting List',
+       x = 'Days in Waiting List',
+       y = 'Cancellation Rate (%)') +
+  theme_minimal()
+
+```
+
+```{r}
+# Removing columns with constant values
+non_constant_columns <- sapply(hotel_data, function(col) length(unique(col)) > 1)
+filtered_data <- hotel_data[, non_constant_columns]
+
+# Calculating the correlation matrix for numerical columns
+cor_matrix <- cor(filtered_data[, sapply(filtered_data, is.numeric)], use = "complete.obs")
+
+# Handling potential NA values in the correlation matrix
+cor_matrix[is.na(cor_matrix)] <- 0
+
+# Creating the correlation plot
+corrplot(cor_matrix, method = "color", type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+
+
+
+```
+
+```{r}
+# Grouping by customer type and calculating cancellation rate
+customer_type_data <- hotel_data %>%
+  group_by(customer_type) %>%
+  summarise(cancellation_rate = mean(is_canceled, na.rm = TRUE) * 100)
+
+# Visualizing the results
+ggplot(customer_type_data, aes(x = customer_type, y = cancellation_rate, fill = customer_type)) +
+  geom_bar(stat = 'identity') +
+  labs(title = 'Cancellation Rate by Customer Type',
+       x = 'Customer Type',
+       y = 'Cancellation Rate (%)') +
+  theme_minimal()
+
+
+```
